@@ -5,6 +5,13 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (s) => document.querySelector(s);
 const PAGE_SIZE = 50;
 const REACTIONS = ['👍', '🙇', '🎉', '😊', '👏', '😮', '❤️'];
+const EMOJIS = ['😊', '😄', '😂', '🙂', '😉', '😍', '🤔', '😮', '😢', '😭', '😅', '🙇', '🙏', '👍', '👏', '🎉',
+  '✨', '💡', '✅', '❗', '❓', '⚠️', '📅', '📎', '📝', '📞', '🚃', '🏨', '☕', '🍵', '❤️', '💦'];
+const ICON = {
+  group: '<svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3.5"/><circle cx="17" cy="10" r="2.5"/><path d="M3 19c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M15 14.5c3 0 6 1.5 6 4.5"/></svg>',
+  task: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l3 3 5-6"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M6 2h8l5 5v15H6z"/><path d="M14 2v5h5"/></svg>',
+};
 
 const state = {
   me: null,               // profiles の自分の行
@@ -22,7 +29,7 @@ const state = {
   replyTo: null,
   editingId: null,
   pendingFiles: [],
-  panelTab: 'tasks',
+  taskFilter: 'open',
   taskTab: 'mine',
   view: 'chat',
 };
@@ -49,21 +56,23 @@ function avatarHtml(id, cls = '') {
   const name = state.profiles.get(id)?.display_name || '?';
   let h = 0;
   for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `<span class="avatar ${cls}" style="background:hsl(${h} 45% 48%)">${esc(name.trim().charAt(0))}</span>`;
+  return `<span class="avatar ${cls}" style="background:hsl(${h} 38% 52%)" title="${esc(name)}">${esc(name.trim().charAt(0))}</span>`;
 }
-function fmtTime(ts) {
-  const d = new Date(ts);
-  return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+function roomAvatarHtml(room, cls = '') {
+  if (room.is_direct) return room.other_user_id ? avatarHtml(room.other_user_id, cls) : avatarHtml(state.me.id, cls);
+  return `<span class="avatar group ${cls}">${ICON.group}</span>`;
 }
-function fmtDate(ts) {
+function fmtStamp(ts) {
   const d = new Date(ts);
-  return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  return `${sameYear ? '' : d.getFullYear() + '年'}${d.getMonth() + 1}月${d.getDate()}日 ${time}`;
 }
 function fmtSize(n) {
   if (n == null) return '';
   if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1048576).toFixed(1)} MB`;
+  if (n < 1048576) return `${(n / 1024).toFixed(2)} KB`;
+  return `${(n / 1048576).toFixed(2)} MB`;
 }
 function todayStr() {
   const d = new Date();
@@ -80,19 +89,23 @@ function storageGet(k, def) {
 function storageSet(k, v) {
   try { localStorage.setItem(k, v); } catch { /* 保存できない環境では無視 */ }
 }
+const UUID = '[0-9a-f-]{36}';
 
 // メッセージ本文の表示用変換（必ずエスケープしてからタグを置換する）
 function renderBody(body) {
   let html = esc(body);
   html = html.replace(/\[task\]([\s\S]*?)\[\/task\]/g, '');
-  html = html.replace(/\[To:([0-9a-f-]{36})\]/g, '<span class="tag to">To</span>');
+  html = html.replace(new RegExp(`\\[qt:(${UUID})\\]\\n?([\\s\\S]*?)\\n?\\[\\/qt\\]\\n?`, 'g'),
+    (_, id, text) => `<div class="quote">${avatarHtml(id, 'xs')}<b>${esc(nameOf(id))}</b>\n${text}</div>`);
+  html = html.replace(new RegExp(`\\[To:(${UUID})\\]`, 'g'), (_, id) => `<span class="tag to">TO</span>${avatarHtml(id, 'xs')}`);
   html = html.replace(/\[toall\]/g, '<span class="tag toall">TO ALL</span>');
   html = html.replace(/(https?:\/\/[^\s<>"']+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
   return html.trim();
 }
 function stripTags(body) {
   return String(body ?? '')
-    .replace(/\[To:[0-9a-f-]{36}\]/g, '')
+    .replace(new RegExp(`\\[To:${UUID}\\]`, 'g'), '')
+    .replace(new RegExp(`\\[qt:${UUID}\\][\\s\\S]*?\\[\\/qt\\]`, 'g'), '')
     .replace(/\[toall\]/g, '')
     .replace(/\[\/?task\]/g, '')
     .trim();
@@ -137,6 +150,7 @@ function memberPickHtml(people, { checked = [], type = 'checkbox', name = 'membe
     <label><input type="${type}" name="${name}" value="${p.id}" ${checked.includes(p.id) ? 'checked' : ''}>
       ${avatarHtml(p.id, 'sm')} ${esc(p.display_name)}${p.title ? ` <small style="color:var(--muted)">${esc(p.title)}</small>` : ''}</label>`).join('')}</div>`;
 }
+const CLOSE_BTN = '<div class="dialog-actions"><button class="btn" value="cancel">閉じる</button></div>';
 
 // ---------- 認証 ----------
 $('#auth-form').onsubmit = async (e) => {
@@ -186,6 +200,7 @@ async function boot(user) {
   subscribeRealtime();
   await refreshRooms();
   refreshMyTaskBadge();
+  renderPanel();
   const fromHash = location.hash.match(/^#room=([0-9a-f-]{36})/)?.[1];
   const start = fromHash && state.rooms.some((r) => r.room_id === fromHash) ? fromHash : state.rooms[0]?.room_id;
   if (start && (window.innerWidth > 700 || fromHash)) await openRoom(start);
@@ -203,7 +218,7 @@ async function loadProfiles() {
 }
 function renderMe() {
   $('#me-name').textContent = state.me.display_name;
-  $('#me-avatar').outerHTML = `<span id="me-avatar">${avatarHtml(state.me.id, 'sm')}</span>`;
+  $('#me-avatar').innerHTML = avatarHtml(state.me.id, 'sm');
 }
 
 // ---------- リアルタイム ----------
@@ -261,15 +276,13 @@ function onAttachmentChange({ eventType, new: row }) {
   state.attachments.set(row.message_id, list);
   const atBottom = isNearBottom();
   renderMessages({ keepBottom: atBottom, preserve: !atBottom });
-  if (state.panelTab === 'files') renderPanel();
 }
 function onTaskChange({ eventType, new: row, old }) {
   refreshMyTaskBadge();
   if (state.view === 'tasks') renderMyTasks();
-  const roomId = eventType === 'DELETE' ? null : row.room_id;
   if (eventType === 'DELETE') {
     state.tasks = state.tasks.filter((t) => t.id !== old.id);
-  } else if (roomId === state.currentRoomId) {
+  } else if (row.room_id === state.currentRoomId) {
     const i = state.tasks.findIndex((t) => t.id === row.id);
     if (i >= 0) state.tasks[i] = row; else state.tasks.push(row);
   } else return;
@@ -305,7 +318,7 @@ function maybeNotify(m) {
     body: stripTags(m.body).slice(0, 120) || '（ファイル）',
     tag: `room-${m.room_id}`,
   });
-  n.onclick = () => { window.focus(); showView('chat'); openRoom(m.room_id); n.close(); };
+  n.onclick = () => { window.focus(); openRoom(m.room_id); n.close(); };
 }
 
 // ---------- ルーム一覧 ----------
@@ -315,19 +328,26 @@ async function refreshRooms() {
   state.rooms = data;
   renderRooms();
   const unread = data.reduce((s, r) => s + Number(r.unread_count), 0);
+  const mention = data.reduce((s, r) => s + Number(r.mention_count), 0);
   document.title = unread ? `(${unread}) ${APP_NAME}` : APP_NAME;
+  $('#tab-unread').hidden = !unread;
+  $('#tab-unread').textContent = unread;
+  $('#tab-mention').hidden = !mention;
+  $('#tab-mention').textContent = mention;
 }
+const FILTER_LABEL = { all: 'すべてのチャット', mention: '自分宛てのチャット', unread: '未読のチャット' };
 function renderRooms() {
-  const q = $('#room-filter').value.trim().toLowerCase();
+  const q = $('#global-search').value.trim().toLowerCase();
   const list = state.rooms.filter((r) => {
     if (q && !(r.name || '').toLowerCase().includes(q)) return false;
     if (state.roomFilter === 'unread') return r.unread_count > 0;
     if (state.roomFilter === 'mention') return r.mention_count > 0;
     return true;
   });
+  $('#filter-label').textContent = FILTER_LABEL[state.roomFilter];
   $('#room-list').innerHTML = list.length ? list.map((r) => `
     <li class="room-item ${r.room_id === state.currentRoomId ? 'active' : ''} ${r.unread_count > 0 ? 'unread' : ''}" data-room="${r.room_id}">
-      ${r.is_direct && r.other_user_id ? avatarHtml(r.other_user_id) : `<span class="avatar" style="background:#5b6472">${r.is_direct ? '自' : '#'}</span>`}
+      ${roomAvatarHtml(r, 'md')}
       <span class="room-name">${esc(r.name)}</span>
       ${r.mention_count > 0 ? `<span class="badge to">${r.mention_count}</span>` : r.unread_count > 0 ? `<span class="badge">${r.unread_count}</span>` : ''}
     </li>`).join('') : '<li class="empty-state">該当するチャットはありません</li>';
@@ -336,13 +356,32 @@ $('#room-list').onclick = (e) => {
   const li = e.target.closest('[data-room]');
   if (li) openRoom(li.dataset.room);
 };
-$('#room-filter').oninput = renderRooms;
 document.querySelectorAll('[data-filter]').forEach((b) => (b.onclick = () => {
   state.roomFilter = b.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('active', x === b));
   renderRooms();
 }));
 $('#toggle-sidebar').onclick = () => $('#sidebar').classList.toggle('open');
+
+// ---------- 検索（入力でルーム名を絞り込み、Enter でメッセージ本文を検索） ----------
+$('#global-search').oninput = renderRooms;
+$('#global-search').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter' || e.isComposing) return;
+  const q = e.target.value.trim();
+  if (!q) return;
+  const pattern = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  const { data, error } = await sb.from('messages').select('id,room_id,user_id,body,created_at')
+    .ilike('body', pattern).is('deleted_at', null).order('id', { ascending: false }).limit(50);
+  if (error) return fail(error);
+  const roomName = (id) => state.rooms.find((r) => r.room_id === id)?.name || '';
+  openDialog(`<h3>「${esc(q)}」の検索結果（${data.length}件${data.length === 50 ? '以上' : ''}）</h3>
+    <div class="scroll-box">${data.map((m) => `
+      <button class="search-hit" value="cancel" data-goto-room="${m.room_id}" data-goto-msg="${m.id}">
+        <div>${esc(stripTags(m.body).slice(0, 120))}</div>
+        <div class="sub">${esc(roomName(m.room_id))} ・ ${esc(nameOf(m.user_id))} ・ ${fmtStamp(m.created_at)}</div>
+      </button>`).join('') || '<p class="task-meta">見つかりませんでした</p>'}</div>
+    ${CLOSE_BTN}`);
+});
 
 // ---------- ルームを開く ----------
 async function openRoom(roomId) {
@@ -376,9 +415,9 @@ function closeRoom() {
   state.currentRoomId = null;
   $('#no-room').hidden = false;
   $('#chat-inner').hidden = true;
-  $('#panel').hidden = true;
   history.replaceState(null, '', location.pathname);
   renderRooms();
+  renderPanel();
 }
 function currentRoom() {
   return state.rooms.find((r) => r.room_id === state.currentRoomId);
@@ -442,8 +481,15 @@ document.addEventListener('visibilitychange', () => {
 function renderRoomHeader() {
   const room = currentRoom();
   if (!room) return;
+  $('#chat-avatar').innerHTML = roomAvatarHtml(room, 'md');
   $('#chat-title').textContent = room.name;
-  $('#chat-sub').textContent = room.is_direct ? '個人チャット' : `${state.members.length}人のメンバー${room.description ? ' ・ ' + room.description : ''}`;
+  const shown = state.members.slice(0, 5);
+  const rest = state.members.length - shown.length;
+  $('#member-stack').innerHTML = room.is_direct ? '' :
+    shown.map((m) => avatarHtml(m.user_id)).join('') + (rest > 0 ? `<span class="avatar more">+${rest}</span>` : '');
+  $('#member-stack').hidden = room.is_direct;
+  $('#invite-btn').hidden = room.is_direct || room.role !== 'admin';
+  $('#settings-btn').hidden = room.is_direct;
 }
 
 // ---------- メッセージ表示 ----------
@@ -456,20 +502,17 @@ function renderMessages({ keepBottom = false, scrollToUnread = false, preserve =
   const prevTop = tl.scrollTop;
   $('#load-more').hidden = !state.hasMore;
   let html = '';
-  let lastDate = '';
   let unreadMarked = false;
   for (const m of state.messages) {
     if (m.deleted_at) continue;
-    const d = fmtDate(m.created_at);
-    if (d !== lastDate) { html += `<div class="date-sep"><span>${d}</span></div>`; lastDate = d; }
     if (!unreadMarked && state.lastReadAtOpen && m.id > state.lastReadAtOpen && m.user_id !== state.me.id) {
-      html += '<div class="unread-sep" id="unread-sep">ここから未読</div>';
+      html += '<div class="unread-sep" id="unread-sep">未読メッセージ</div>';
       unreadMarked = true;
     }
     html += messageHtml(m);
   }
   $('#messages').innerHTML = html || '<div class="empty-state">まだメッセージはありません</div>';
-  fillAttachmentUrls();
+  fillImageUrls();
   if (scrollToUnread && $('#unread-sep')) $('#unread-sep').scrollIntoView({ block: 'center' });
   else if (keepBottom || scrollToUnread) tl.scrollTop = tl.scrollHeight;
   else if (preserve) tl.scrollTop = prevTop;
@@ -488,9 +531,9 @@ function messageHtml(m) {
     <div class="msg-main">
       <div class="msg-head">
         <span class="msg-name">${esc(nameOf(m.user_id))}</span>
-        <span class="msg-time">${fmtTime(m.created_at)}${m.edited_at ? '（編集済み）' : ''}</span>
+        <span class="msg-time">${fmtStamp(m.created_at)}${m.edited_at ? '（編集済み）' : ''}</span>
       </div>
-      ${m.reply_to ? `<div class="reply-quote" data-jump="${m.reply_to}"><span class="tag re">RE</span>${parent ? `${esc(nameOf(parent.user_id))}：${esc(stripTags(parent.body).slice(0, 80))}` : '以前のメッセージ'}</div>` : ''}
+      ${m.reply_to ? `<div class="re-line" data-jump="${m.reply_to}" title="返信元を表示"><span class="tag re">RE</span>${parent ? `${avatarHtml(parent.user_id, 'xs')}${esc(nameOf(parent.user_id))}さん` : '&nbsp;以前のメッセージ'}</div>` : ''}
       <div class="msg-body">${renderBody(m.body)}</div>
       ${taskMatch ? taskBlockHtml(taskMatch[1], tasks) : ''}
       ${files.length ? `<div class="attachments">${files.map(attachmentHtml).join('')}</div>` : ''}
@@ -501,7 +544,7 @@ function messageHtml(m) {
       <span class="reaction-picker">${REACTIONS.map((e) => `<button data-react="${e}" title="リアクション">${e}</button>`).join('')}</span>
       <button data-act="reply">返信</button>
       <button data-act="quote">引用</button>
-      <button data-act="task">タスク化</button>
+      <button data-act="task">タスク</button>
       ${mine ? '<button data-act="edit">編集</button><button data-act="delete">削除</button>' : ''}
     </div>
   </div>`;
@@ -510,30 +553,37 @@ function taskBlockHtml(text, tasks) {
   const allDone = tasks.length && tasks.every((t) => t.done);
   const t0 = tasks[0];
   return `<div class="task-block ${allDone ? 'done' : ''}">
-    <div class="task-text">✔ ${esc(text)}</div>
+    <div class="task-title">${ICON.task}<span class="task-text">${esc(text)}</span></div>
     <div class="task-meta">担当：${tasks.length ? tasks.map((t) => `${esc(nameOf(t.assignee_id))}${t.done ? '（完了）' : ''}`).join('、') : '—'}
       ${t0?.due_date ? ' ・ ' + dueHtml(t0.due_date, allDone) : ''}</div>
   </div>`;
 }
 function attachmentHtml(a) {
   const isImg = (a.mime_type || '').startsWith('image/');
-  if (isImg) return `<a class="file-link" data-path="${esc(a.storage_path)}" data-img="1"><img class="img-preview" alt="${esc(a.file_name)}" data-path="${esc(a.storage_path)}"></a>`;
-  return `<a class="file-card file-link" data-path="${esc(a.storage_path)}" data-name="${esc(a.file_name)}" target="_blank" rel="noopener">
-    📄 <span class="fname">${esc(a.file_name)}</span><span class="fsize">${fmtSize(a.size_bytes)}</span></a>`;
+  const canPreview = isImg || a.mime_type === 'application/pdf' || (a.mime_type || '').startsWith('text/');
+  return `<div>
+    <div class="file-card">
+      <a class="fname" data-path="${esc(a.storage_path)}" data-name="${esc(a.file_name)}" title="ダウンロード">${esc(a.file_name)} (${fmtSize(a.size_bytes)})</a>
+      ${canPreview ? `<button class="preview-btn" data-preview="${esc(a.storage_path)}" ${isImg ? 'data-img="1"' : ''}>プレビュー</button>` : ''}
+    </div>
+    ${isImg ? `<img class="img-preview" alt="${esc(a.file_name)}" data-path="${esc(a.storage_path)}" data-preview="${esc(a.storage_path)}" data-img="1" style="margin-top:6px">` : ''}
+  </div>`;
 }
 
 // 添付ファイルは非公開なので、表示時に期限付きURLを発行する
-const signedUrls = new Map(); // path -> {url, exp}
-async function signedUrl(path) {
-  const c = signedUrls.get(path);
+const signedUrls = new Map(); // key -> {url, exp}
+async function signedUrl(path, downloadName) {
+  const key = downloadName ? `${path}\n${downloadName}` : path;
+  const c = signedUrls.get(key);
   if (c && c.exp > Date.now()) return c.url;
-  const { data, error } = await sb.storage.from('attachments').createSignedUrl(path, 3600);
+  const { data, error } = await sb.storage.from('attachments')
+    .createSignedUrl(path, 3600, downloadName ? { download: downloadName } : undefined);
   if (error) throw error;
-  signedUrls.set(path, { url: data.signedUrl, exp: Date.now() + 3500 * 1000 });
+  signedUrls.set(key, { url: data.signedUrl, exp: Date.now() + 3500 * 1000 });
   return data.signedUrl;
 }
-function fillAttachmentUrls() {
-  document.querySelectorAll('#messages img[data-path], #panel-body img[data-path]').forEach(async (img) => {
+function fillImageUrls() {
+  document.querySelectorAll('#messages img[data-path]').forEach(async (img) => {
     try {
       const wasBottom = isNearBottom();
       img.src = await signedUrl(img.dataset.path);
@@ -541,9 +591,9 @@ function fillAttachmentUrls() {
     } catch (err) { console.error(err); }
   });
 }
-async function openAttachment(el) {
+async function previewFile(el) {
   try {
-    const url = await signedUrl(el.dataset.path);
+    const url = await signedUrl(el.dataset.preview);
     if (el.dataset.img) {
       openDialog(`<img class="img-full" src="${esc(url)}" alt="">
         <div class="dialog-actions"><a class="btn" href="${esc(url)}" target="_blank" rel="noopener">新しいタブで開く</a><button class="btn primary" value="cancel">閉じる</button></div>`);
@@ -552,11 +602,24 @@ async function openAttachment(el) {
     }
   } catch (err) { fail(err); }
 }
+async function downloadFile(el) {
+  try {
+    const a = document.createElement('a');
+    a.href = await signedUrl(el.dataset.path, el.dataset.name);
+    a.click();
+  } catch (err) { fail(err); }
+}
+// 添付ファイルの操作（タイムライン・ダイアログ共通）
+document.addEventListener('click', (e) => {
+  const pv = e.target.closest('[data-preview]');
+  if (pv) { e.preventDefault(); previewFile(pv); return; }
+  const dl = e.target.closest('a.fname[data-path]');
+  if (dl) { e.preventDefault(); downloadFile(dl); }
+});
 
 // メッセージ上の操作
 $('#messages').addEventListener('click', async (e) => {
-  const file = e.target.closest('.file-link');
-  if (file) { e.preventDefault(); return openAttachment(file); }
+  if (e.target.closest('[data-preview], a.fname')) return;
   const jump = e.target.closest('[data-jump]');
   if (jump) return jumpTo(Number(jump.dataset.jump));
   const msgEl = e.target.closest('.msg');
@@ -575,14 +638,14 @@ $('#messages').addEventListener('click', async (e) => {
     return;
   }
   if (act === 'reply') startReply(m);
-  if (act === 'quote') insertText(`「${nameOf(m.user_id)}さんのメッセージ」\n> ${stripTags(m.body).split('\n').join('\n> ')}\n`);
+  if (act === 'quote') insertText(`[qt:${m.user_id}]${stripTags(m.body)}[/qt]\n`);
   if (act === 'task') openTaskDialog(stripTags(m.body));
   if (act === 'edit') startEdit(m);
   if (act === 'delete') deleteMessage(m);
 });
 function jumpTo(id) {
   const el = $(`#msg-${id}`);
-  if (!el) return toast('元のメッセージはこの画面より前にあります');
+  if (!el) return toast('元のメッセージはこの画面より前にあります（「以前のメッセージを読み込む」で表示できます）');
   el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   el.classList.remove('highlight');
   void el.offsetWidth;
@@ -652,7 +715,7 @@ function cancelContext() {
 function startReply(m) {
   state.editingId = null;
   state.replyTo = m.id;
-  setContext(`返信：${nameOf(m.user_id)}「${stripTags(m.body).slice(0, 40)}」`);
+  setContext(`返信：${nameOf(m.user_id)}さん「${stripTags(m.body).slice(0, 40)}」`);
   $('#send-btn').textContent = '送信';
   input.focus();
 }
@@ -664,6 +727,17 @@ function startEdit(m) {
   $('#send-btn').textContent = '更新';
   input.focus();
 }
+
+// 絵文字
+$('#emoji-pop').innerHTML = EMOJIS.map((e) => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
+$('#emoji-btn').onclick = (e) => { e.stopPropagation(); $('#emoji-pop').hidden = !$('#emoji-pop').hidden; };
+$('#emoji-pop').onclick = (e) => {
+  const b = e.target.closest('[data-emoji]');
+  if (b) { insertText(b.dataset.emoji); $('#emoji-pop').hidden = true; }
+};
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#emoji-pop, #emoji-btn')) $('#emoji-pop').hidden = true;
+});
 
 $('#to-btn').onclick = () => {
   const others = state.members.filter((x) => x.user_id !== state.me.id).map((x) => state.profiles.get(x.user_id)).filter(Boolean);
@@ -766,6 +840,7 @@ async function uploadFiles(msg, files) {
 
 // ---------- タスク ----------
 $('#task-btn').onclick = () => openTaskDialog(input.value.trim());
+$('#panel-add-task').onclick = () => { if (state.currentRoomId) openTaskDialog(); };
 function openTaskDialog(text = '') {
   const people = state.members.map((x) => state.profiles.get(x.user_id)).filter(Boolean);
   openDialog(`<h3>タスクを追加</h3>
@@ -850,75 +925,87 @@ document.addEventListener('click', async (e) => {
   if (del) return deleteTask(del.dataset.delTask);
   const go = e.target.closest('[data-goto-room]');
   if (go) {
+    $('#dialog').close();
     await openRoom(go.dataset.gotoRoom);
     if (go.dataset.gotoMsg) setTimeout(() => jumpTo(Number(go.dataset.gotoMsg)), 50);
   }
 });
 
-// ---------- 右パネル ----------
-$('#toggle-panel').onclick = () => { $('#panel').hidden = !$('#panel').hidden; renderPanel(); };
-document.querySelectorAll('[data-panel]').forEach((b) => (b.onclick = () => {
-  state.panelTab = b.dataset.panel;
-  document.querySelectorAll('[data-panel]').forEach((x) => x.classList.toggle('active', x === b));
+// ---------- 右パネル（概要・タスク） ----------
+$('#toggle-panel').onclick = () => $('#panel').classList.toggle('open');
+document.querySelectorAll('[data-taskfilter]').forEach((b) => (b.onclick = () => {
+  state.taskFilter = b.dataset.taskfilter;
+  document.querySelectorAll('[data-taskfilter]').forEach((x) => x.classList.toggle('active', x === b));
   renderPanel();
 }));
-async function renderPanel() {
-  if ($('#panel').hidden || !state.currentRoomId) return;
-  const body = $('#panel-body');
+function renderPanel() {
   const room = currentRoom();
-  if (state.panelTab === 'tasks') {
-    const open = state.tasks.filter((t) => !t.done);
-    const done = state.tasks.filter((t) => t.done);
-    body.innerHTML = `<button class="btn primary sm" id="panel-add-task">＋ タスクを追加</button>
-      <h3 style="margin-top:14px">未完了（${open.length}）</h3>
-      <ul class="task-list">${open.map((t) => taskItemHtml(t)).join('') || '<li class="task-meta">なし</li>'}</ul>
-      <h3>完了（${done.length}）</h3>
-      <ul class="task-list">${done.slice(0, 30).map((t) => taskItemHtml(t)).join('') || '<li class="task-meta">なし</li>'}</ul>`;
-    $('#panel-add-task').onclick = () => openTaskDialog();
-  } else if (state.panelTab === 'files') {
-    const { data, error } = await sb.from('attachments').select('*').eq('room_id', state.currentRoomId).order('created_at', { ascending: false }).limit(100);
-    if (error) return fail(error);
-    if (state.panelTab !== 'files') return;
-    body.innerHTML = data.length ? data.map((a) => `
-      <div class="member-row">
-        <a class="file-card file-link grow" data-path="${esc(a.storage_path)}" ${(a.mime_type || '').startsWith('image/') ? 'data-img="1"' : ''}>
-          ${(a.mime_type || '').startsWith('image/') ? '🖼' : '📄'} <span class="fname">${esc(a.file_name)}</span><span class="fsize">${fmtSize(a.size_bytes)}</span></a>
-      </div>
-      <div class="task-meta" style="margin:-2px 0 8px">${esc(nameOf(a.uploaded_by))} ・ ${new Date(a.created_at).toLocaleString('ja-JP')}</div>`).join('')
-      : '<p class="task-meta">共有されたファイルはありません</p>';
-  } else {
-    const amAdmin = room.role === 'admin';
-    body.innerHTML = `
-      <h3>チャット名</h3><div>${esc(room.name)}</div>
-      ${room.description ? `<h3>概要</h3><div style="white-space:pre-wrap">${esc(room.description)}</div>` : ''}
-      <h3>メンバー（${state.members.length}）</h3>
-      ${state.members.map((mb) => `<div class="member-row">${avatarHtml(mb.user_id, 'sm')}
-        <span class="grow">${esc(nameOf(mb.user_id))}</span>
-        ${mb.role === 'admin' && !room.is_direct ? '<span class="role">管理者</span>' : ''}
-        ${amAdmin && !room.is_direct && mb.user_id !== state.me.id ? `<button class="link" data-kick="${mb.user_id}">外す</button>` : ''}
-      </div>`).join('')}
-      ${!room.is_direct ? `<div class="dialog-actions" style="justify-content:flex-start;flex-wrap:wrap">
-        ${amAdmin ? '<button class="btn sm" id="edit-room">名前・概要を編集</button><button class="btn sm" id="add-members">メンバー追加</button>' : ''}
-        <button class="btn sm danger" id="leave-room">退出する</button></div>` : ''}`;
-    $('#edit-room')?.addEventListener('click', editRoom);
-    $('#add-members')?.addEventListener('click', addMembers);
-    $('#leave-room')?.addEventListener('click', () => removeMember(state.me.id, true));
-    body.querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => removeMember(b.dataset.kick)));
+  $('#edit-desc').hidden = !room || room.is_direct || room.role !== 'admin';
+  $('#panel-add-task').disabled = !room;
+  if (!room) {
+    $('#room-desc').textContent = '';
+    $('#room-tasks').innerHTML = '';
+    return;
   }
-  fillAttachmentUrls();
+  $('#room-desc').textContent = room.description || '概要はありません';
+  $('#room-desc').classList.toggle('empty', !room.description);
+  const list = state.tasks.filter((t) => (state.taskFilter === 'done' ? t.done : !t.done));
+  $('#room-tasks').innerHTML = list.length ? list.slice(0, 50).map((t) => taskItemHtml(t)).join('')
+    : `<li class="task-empty">${ICON.task}${state.taskFilter === 'done' ? '完了したタスクはありません' : '現在タスクはありません'}</li>`;
 }
-$('#panel-body').addEventListener('click', (e) => {
-  const file = e.target.closest('.file-link');
-  if (file) { e.preventDefault(); openAttachment(file); return; }
+$('#panel').addEventListener('click', (e) => {
   const jump = e.target.closest('[data-jump]');
-  if (jump) jumpTo(Number(jump.dataset.jump));
+  if (jump) { jumpTo(Number(jump.dataset.jump)); $('#panel').classList.remove('open'); }
 });
+$('#edit-desc').onclick = editRoom;
+
+// ---------- チャットの設定・メンバー・ファイル ----------
+$('#invite-btn').onclick = addMembers;
+$('#settings-btn').onclick = () => {
+  const room = currentRoom();
+  if (room.role === 'admin') return editRoom();
+  openDialog(`<h3>チャットの設定</h3><p>${esc(room.name)}</p>
+    <div class="dialog-actions" style="justify-content:space-between"><button class="btn danger" type="button" id="dlg-leave">このチャットから退出する</button><button class="btn" value="cancel">閉じる</button></div>`);
+  $('#dlg-leave').onclick = () => { $('#dialog').close(); removeMember(state.me.id, true); };
+};
+$('#member-stack').onclick = showMembers;
+function showMembers() {
+  const room = currentRoom();
+  const amAdmin = room.role === 'admin';
+  openDialog(`<h3>メンバー（${state.members.length}人）</h3>
+    <div class="scroll-box">${state.members.map((mb) => `<div class="member-row">${avatarHtml(mb.user_id, 'sm')}
+      <span class="grow">${esc(nameOf(mb.user_id))}${state.profiles.get(mb.user_id)?.title ? ` <small style="color:var(--muted)">${esc(state.profiles.get(mb.user_id).title)}</small>` : ''}</span>
+      ${mb.role === 'admin' ? '<span class="role">管理者</span>' : ''}
+      ${amAdmin && mb.user_id !== state.me.id ? `<button class="link" type="button" data-kick="${mb.user_id}">外す</button>` : ''}
+    </div>`).join('')}</div>
+    <div class="dialog-actions" style="justify-content:space-between">
+      <span>${amAdmin ? '<button class="btn sm" type="button" id="dlg-invite">＋ 招待</button>' : ''}</span>
+      <button class="btn" value="cancel">閉じる</button></div>`);
+  $('#dlg-invite')?.addEventListener('click', () => { $('#dialog').close(); addMembers(); });
+  document.querySelectorAll('#dialog [data-kick]').forEach((b) => (b.onclick = async () => {
+    $('#dialog').close();
+    await removeMember(b.dataset.kick);
+  }));
+}
+$('#files-btn').onclick = async () => {
+  const { data, error } = await sb.from('attachments').select('*').eq('room_id', state.currentRoomId).order('created_at', { ascending: false }).limit(200);
+  if (error) return fail(error);
+  openDialog(`<h3>ファイル（${data.length}件）</h3>
+    <div class="scroll-box">${data.map((a) => `
+      <div class="member-row">${ICON.file}
+        <div class="grow"><a class="fname" style="color:var(--link);cursor:pointer" data-path="${esc(a.storage_path)}" data-name="${esc(a.file_name)}">${esc(a.file_name)}</a>
+          <div class="task-meta" style="margin:0">${esc(nameOf(a.uploaded_by))} ・ ${fmtStamp(a.created_at)} ・ ${fmtSize(a.size_bytes)}</div></div>
+      </div>`).join('') || '<p class="task-meta">共有されたファイルはありません</p>'}</div>
+    ${CLOSE_BTN}`);
+};
 function editRoom() {
   const room = currentRoom();
-  openDialog(`<h3>チャットを編集</h3>
+  openDialog(`<h3>チャットの設定</h3>
     <label class="field">チャット名<input name="name" required value="${esc(room.name)}" autofocus></label>
-    <label class="field">概要<textarea name="description" rows="3">${esc(room.description || '')}</textarea></label>
-    <div class="dialog-actions"><button class="btn" value="cancel">キャンセル</button><button class="btn primary" value="ok">保存</button></div>`,
+    <label class="field">概要<textarea name="description" rows="4">${esc(room.description || '')}</textarea></label>
+    <div class="dialog-actions" style="justify-content:space-between">
+      <button class="btn danger" type="button" id="dlg-leave">退出する</button>
+      <span><button class="btn" value="cancel">キャンセル</button> <button class="btn primary" value="ok">保存</button></span></div>`,
   async (fd) => {
     const { error } = await sb.from('rooms').update({ name: fd.get('name').trim(), description: fd.get('description').trim() || null }).eq('id', room.room_id);
     if (error) throw error;
@@ -926,13 +1013,14 @@ function editRoom() {
     renderRoomHeader();
     renderPanel();
   });
+  $('#dlg-leave').onclick = () => { $('#dialog').close(); removeMember(state.me.id, true); };
 }
 function addMembers() {
   const inRoom = new Set(state.members.map((m) => m.user_id));
   const candidates = [...state.profiles.values()].filter((p) => !inRoom.has(p.id));
-  if (!candidates.length) return toast('追加できるメンバーはいません');
-  openDialog(`<h3>メンバーを追加</h3>${memberPickHtml(candidates)}
-    <div class="dialog-actions"><button class="btn" value="cancel">キャンセル</button><button class="btn primary" value="ok">追加</button></div>`,
+  if (!candidates.length) return toast('招待できるメンバーはいません');
+  openDialog(`<h3>メンバーを招待</h3>${memberPickHtml(candidates)}
+    <div class="dialog-actions"><button class="btn" value="cancel">キャンセル</button><button class="btn primary" value="ok">招待</button></div>`,
   async (fd) => {
     const ids = fd.getAll('members');
     if (!ids.length) return;
@@ -940,7 +1028,6 @@ function addMembers() {
     if (error) throw error;
     await loadMembers();
     renderRoomHeader();
-    renderPanel();
   });
 }
 async function removeMember(userId, self = false) {
@@ -950,7 +1037,7 @@ async function removeMember(userId, self = false) {
   }
   const { error } = await sb.from('room_members').delete().match({ room_id: state.currentRoomId, user_id: userId });
   if (error) return fail(error);
-  if (self) { await refreshRooms(); closeRoom(); } else { await loadMembers(); renderRoomHeader(); renderPanel(); }
+  if (self) { await refreshRooms(); closeRoom(); } else { await loadMembers(); renderRoomHeader(); }
 }
 
 // ---------- 新しいチャット ----------
@@ -960,7 +1047,7 @@ $('#new-room-btn').onclick = () => {
     <label class="field">チャット名<input name="name" required autofocus placeholder="例：営業部"></label>
     <label class="field">概要（任意）<textarea name="description" rows="2"></textarea></label>
     <label class="field">メンバー${others.length ? memberPickHtml(others) : '<div class="task-meta">まだ他のメンバーがいません</div>'}</label>
-    <p class="task-meta">個人チャットは上の「メンバー」から相手を選んで始められます。</p>
+    <p class="task-meta">個人チャットは右上のメンバーアイコンから相手を選んで始められます。</p>
     <div class="dialog-actions"><button class="btn" value="cancel">キャンセル</button><button class="btn primary" value="ok">作成</button></div>`,
   async (fd) => {
     const { data, error } = await sb.rpc('create_group_room', {
@@ -997,19 +1084,18 @@ $('#contact-list').onclick = async (e) => {
 // ---------- 画面切替・プロフィール ----------
 function showView(v) {
   state.view = v;
-  $('#nav-chat').classList.toggle('active', v === 'chat');
   $('#nav-tasks').classList.toggle('active', v === 'tasks');
   $('#nav-contacts').classList.toggle('active', v === 'contacts');
   $('#chat-view').hidden = v !== 'chat';
+  $('#panel').hidden = v !== 'chat';
   $('#tasks-view').hidden = v !== 'tasks';
   $('#contacts-view').hidden = v !== 'contacts';
-  if (v !== 'chat') $('#panel').hidden = true;
   if (v === 'tasks') renderMyTasks();
   if (v === 'contacts') renderContacts();
 }
-$('#nav-chat').onclick = () => { showView('chat'); if (window.innerWidth <= 700) $('#sidebar').classList.add('open'); };
-$('#nav-tasks').onclick = () => { showView('tasks'); $('#sidebar').classList.remove('open'); };
-$('#nav-contacts').onclick = () => { showView('contacts'); $('#sidebar').classList.remove('open'); };
+$('#brand').onclick = () => showView('chat');
+$('#nav-tasks').onclick = () => { showView(state.view === 'tasks' ? 'chat' : 'tasks'); $('#sidebar').classList.remove('open'); };
+$('#nav-contacts').onclick = () => { showView(state.view === 'contacts' ? 'chat' : 'contacts'); $('#sidebar').classList.remove('open'); };
 
 $('#me-btn').onclick = () => {
   openDialog(`<h3>プロフィール</h3>

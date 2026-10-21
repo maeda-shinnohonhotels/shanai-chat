@@ -10,7 +10,7 @@
   <!-- ログイン画面 -->
   <section id="auth-view" class="auth" hidden>
     <div class="auth-card">
-      <h1 class="auth-logo">社内チャット</h1>
+      <h1 class="auth-logo"><span class="brand-mark"></span>社内チャット</h1>
       <form id="auth-form">
         <label>メールアドレス<input name="email" type="email" required autocomplete="email" placeholder="name@shinnihonhotels.co.jp"></label>
         <label>パスワード<input name="password" type="password" required autocomplete="current-password"></label>
@@ -24,30 +24,47 @@
   <!-- メイン画面 -->
   <div id="app-view" class="app" hidden>
     <header class="topbar">
-      <button class="icon-btn mobile-only" id="toggle-sidebar" aria-label="ルーム一覧">☰</button>
-      <div class="brand">社内チャット</div>
-      <nav class="topnav">
-        <button id="nav-chat" class="active">チャット</button>
-        <button id="nav-tasks">タスク<span id="mytask-badge" class="badge" hidden></span></button>
-        <button id="nav-contacts">メンバー</button>
-      </nav>
-      <div class="topright">
-        <button class="icon-btn" id="notify-btn" title="デスクトップ通知">🔔</button>
-        <button class="me-btn" id="me-btn"><span class="avatar sm" id="me-avatar"></span><span id="me-name"></span></button>
+      <button class="top-icon mobile-only" id="toggle-sidebar" aria-label="ルーム一覧">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div class="brand" id="brand"><span class="brand-mark"></span><span class="brand-text">社内チャット</span></div>
+      <div class="global-search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input id="global-search" type="search" placeholder="チャット名、メッセージ内容を検索" autocomplete="off">
       </div>
+      <nav class="top-icons">
+        <button class="top-icon" id="nav-tasks" title="タスク">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
+          <span id="mytask-badge" class="dot-badge" hidden></span>
+        </button>
+        <button class="top-icon" id="nav-contacts" title="メンバー">
+          <svg viewBox="0 0 24 24"><circle cx="10" cy="8" r="4"/><path d="M2 21c0-4 3.6-7 8-7s8 3 8 7"/><path d="M19 8v6M16 11h6"/></svg>
+        </button>
+        <button class="top-icon" id="notify-btn" title="デスクトップ通知">
+          <svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
+        </button>
+      </nav>
+      <button class="me-btn" id="me-btn"><span id="me-avatar"></span><span id="me-name"></span><span class="caret">▾</span></button>
     </header>
 
     <div class="main">
       <!-- ルーム一覧 -->
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-head">
-          <input id="room-filter" type="search" placeholder="チャット名で検索">
-          <button class="btn primary sm" id="new-room-btn" title="新しいチャット">＋</button>
+        <div class="side-tabs">
+          <button data-filter="all" class="active">
+            <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>チャット</span>
+          </button>
+          <button data-filter="mention">
+            <span class="to-icon">TO</span><span>自分宛て</span><span class="tab-badge to" id="tab-mention" hidden></span>
+          </button>
+          <button data-filter="unread">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg><span>未読</span><span class="tab-badge" id="tab-unread" hidden></span>
+          </button>
         </div>
-        <div class="room-filter-tabs">
-          <button data-filter="all" class="active">すべて</button>
-          <button data-filter="unread">未読</button>
-          <button data-filter="mention">To</button>
+        <div class="side-head">
+          <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9H3z"/></svg>
+          <span id="filter-label">すべてのチャット</span>
+          <button class="plus-btn" id="new-room-btn" title="グループチャットを作成">＋</button>
         </div>
         <ul class="room-list" id="room-list"></ul>
       </aside>
@@ -57,44 +74,78 @@
         <div class="empty-state" id="no-room">左の一覧からチャットを選んでください</div>
         <div class="chat-inner" id="chat-inner" hidden>
           <div class="chat-head">
-            <div>
-              <div class="chat-title" id="chat-title"></div>
-              <div class="chat-sub" id="chat-sub"></div>
+            <span id="chat-avatar"></span>
+            <div class="chat-title" id="chat-title"></div>
+            <div class="head-right">
+              <button class="member-stack" id="member-stack" title="メンバー一覧"></button>
+              <button class="btn sm invite" id="invite-btn">＋ 招待</button>
+              <button class="head-icon" id="files-btn" title="ファイル">
+                <svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></svg>
+              </button>
+              <button class="head-icon" id="settings-btn" title="チャットの設定">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
+              </button>
+              <button class="head-icon panel-toggle" id="toggle-panel" title="概要・タスク">
+                <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
+              </button>
             </div>
-            <button class="icon-btn" id="toggle-panel" title="概要・タスク・ファイル">ⓘ</button>
           </div>
           <div class="timeline" id="timeline">
             <button class="load-more" id="load-more" hidden>以前のメッセージを読み込む</button>
             <div id="messages"></div>
           </div>
           <div class="composer" id="composer">
-            <div class="composer-tools">
-              <button class="tool" id="to-btn" title="宛先を指定">To</button>
-              <button class="tool" id="attach-btn" title="ファイルを添付">📎 ファイル</button>
-              <button class="tool" id="task-btn" title="タスクを追加">✔ タスク</button>
+            <div class="composer-bar">
+              <button class="tool" id="emoji-btn" title="絵文字">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><circle cx="9" cy="10" r=".8" fill="currentColor"/><circle cx="15" cy="10" r=".8" fill="currentColor"/></svg>
+              </button>
+              <button class="tool to-tool" id="to-btn" title="宛先を指定">TO</button>
+              <button class="tool" id="attach-btn" title="ファイルを添付">
+                <svg viewBox="0 0 24 24"><path d="M20 11l-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/></svg>
+              </button>
+              <button class="tool" id="task-btn" title="タスクを追加">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
+              </button>
+              <span class="spacer"></span>
               <label class="enter-toggle"><input type="checkbox" id="enter-send"> Enterで送信</label>
+              <button class="btn send" id="send-btn">送信</button>
             </div>
+            <div class="emoji-pop" id="emoji-pop" hidden></div>
             <div class="composer-context" id="composer-context" hidden>
               <span id="composer-context-text"></span><button class="link" id="cancel-context">取消</button>
             </div>
             <div class="pending-files" id="pending-files"></div>
-            <textarea id="message-input" rows="3" placeholder="メッセージを入力（Ctrl+Enterで送信）"></textarea>
-            <div class="composer-actions">
-              <button class="btn primary" id="send-btn">送信</button>
-            </div>
+            <textarea id="message-input" rows="4" placeholder="メッセージを入力（Ctrl+Enterで送信）"></textarea>
             <input type="file" id="file-input" multiple hidden>
           </div>
         </div>
       </section>
 
-      <!-- 右パネル -->
-      <aside class="panel" id="panel" hidden>
-        <div class="panel-tabs">
-          <button data-panel="tasks" class="active">タスク</button>
-          <button data-panel="files">ファイル</button>
-          <button data-panel="info">概要</button>
-        </div>
-        <div class="panel-body" id="panel-body"></div>
+      <!-- 右パネル（概要・タスク） -->
+      <aside class="panel" id="panel">
+        <section class="panel-sec">
+          <div class="sec-head">
+            <span>概要</span>
+            <button class="head-icon sm" id="edit-desc" title="概要を編集">
+              <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>
+            </button>
+          </div>
+          <div class="room-desc" id="room-desc"></div>
+        </section>
+        <section class="panel-sec grow">
+          <div class="sec-head">
+            <span>タスク</span>
+            <div class="mini-seg">
+              <button data-taskfilter="open" class="active">未完了</button>
+              <button data-taskfilter="done">完了</button>
+            </div>
+          </div>
+          <button class="task-add" id="panel-add-task">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
+            タスク追加<span class="plus">＋</span>
+          </button>
+          <ul class="task-list" id="room-tasks"></ul>
+        </section>
       </aside>
 
       <!-- マイタスク -->
