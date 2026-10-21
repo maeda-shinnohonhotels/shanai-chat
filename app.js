@@ -1066,13 +1066,53 @@ function renderContacts() {
     !q || p.display_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || (p.title || '').toLowerCase().includes(q));
   $('#contact-list').innerHTML = people.map((p) => `
     <li class="contact">${avatarHtml(p.id)}
-      <div class="grow"><div>${esc(p.display_name)}${p.id === state.me.id ? '（自分）' : ''}</div>
+      <div class="grow"><div>${esc(p.display_name)}${p.id === state.me.id ? '（自分）' : ''}
+          <span class="role ${p.role === 'admin' ? 'admin' : ''}">${p.role === 'admin' ? '管理者' : '一般'}</span></div>
         <div class="sub">${esc(p.title || '')}${p.title ? ' ・ ' : ''}${esc(p.email)}</div></div>
       <button class="btn sm" data-dm="${p.id}">${p.id === state.me.id ? 'マイチャット' : 'チャット'}</button>
+      ${state.me.role === 'admin' ? `<button class="btn sm" data-manage="${p.id}">管理</button>` : ''}
     </li>`).join('');
+}
+// 管理者のみ：権限変更・ユーザー削除（実際の権限チェックは DB 側の関数で行う）
+function openManageUser(id) {
+  const p = state.profiles.get(id);
+  if (!p) return;
+  const self = id === state.me.id;
+  openDialog(`<h3>ユーザー管理</h3>
+    <div class="contact" style="margin-bottom:12px">${avatarHtml(p.id)}
+      <div class="grow"><div>${esc(p.display_name)}</div><div class="sub">${esc(p.email)}</div></div></div>
+    <div class="field">権限
+      <div class="pick-list">
+        <label><input type="radio" name="role" value="admin" ${p.role === 'admin' ? 'checked' : ''}> 管理者（ユーザーの削除・権限変更ができます）</label>
+        <label><input type="radio" name="role" value="member" ${p.role !== 'admin' ? 'checked' : ''}> 一般</label>
+      </div></div>
+    <div class="dialog-actions" style="justify-content:space-between">
+      ${self ? '<span></span>' : '<button class="btn danger" value="delete">このユーザーを削除</button>'}
+      <span><button class="btn" value="cancel">キャンセル</button> <button class="btn primary" value="ok">保存</button></span>
+    </div>`,
+  async (fd, action) => {
+    if (action === 'delete') {
+      if (!confirm(`${p.display_name}さん（${p.email}）を削除しますか？\nログインできなくなり、元に戻せません。投稿は「退会したユーザー」として残ります。`)) return true;
+      const { error } = await sb.rpc('admin_delete_user', { p_user: id });
+      if (error) throw error;
+      toast('ユーザーを削除しました');
+    } else {
+      const role = fd.get('role');
+      if (role === p.role) return;
+      if (self && role !== 'admin' && !confirm('自分を一般にすると、管理画面が使えなくなります。よろしいですか？')) return true;
+      const { error } = await sb.rpc('admin_set_role', { p_user: id, p_role: role });
+      if (error) throw error;
+      toast('権限を変更しました');
+    }
+    await loadProfiles();
+    state.me = state.profiles.get(state.me.id);
+    renderContacts();
+  });
 }
 $('#contact-filter').oninput = renderContacts;
 $('#contact-list').onclick = async (e) => {
+  const m = e.target.closest('[data-manage]');
+  if (m) return openManageUser(m.dataset.manage);
   const b = e.target.closest('[data-dm]');
   if (!b) return;
   const { data, error } = await sb.rpc('get_or_create_direct_room', { p_other: b.dataset.dm });
