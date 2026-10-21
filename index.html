@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>社内チャット</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ログイン画面 -->
+  <section id="auth-view" class="auth" hidden>
+    <div class="auth-card">
+      <h1 class="auth-logo">社内チャット</h1>
+      <form id="auth-form">
+        <label>メールアドレス<input name="email" type="email" required autocomplete="email" placeholder="name@shinnihonhotels.co.jp"></label>
+        <label>パスワード<input name="password" type="password" required autocomplete="current-password"></label>
+        <p id="auth-msg" class="auth-msg"></p>
+        <button type="submit" class="btn primary wide" id="auth-submit">ログイン</button>
+      </form>
+      <p class="auth-note">アカウントは管理者が発行します。お持ちでない方は管理者へご連絡ください。</p>
+    </div>
+  </section>
+
+  <!-- メイン画面 -->
+  <div id="app-view" class="app" hidden>
+    <header class="topbar">
+      <button class="icon-btn mobile-only" id="toggle-sidebar" aria-label="ルーム一覧">☰</button>
+      <div class="brand">社内チャット</div>
+      <nav class="topnav">
+        <button id="nav-chat" class="active">チャット</button>
+        <button id="nav-tasks">タスク<span id="mytask-badge" class="badge" hidden></span></button>
+        <button id="nav-contacts">メンバー</button>
+      </nav>
+      <div class="topright">
+        <button class="icon-btn" id="notify-btn" title="デスクトップ通知">🔔</button>
+        <button class="me-btn" id="me-btn"><span class="avatar sm" id="me-avatar"></span><span id="me-name"></span></button>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- ルーム一覧 -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-head">
+          <input id="room-filter" type="search" placeholder="チャット名で検索">
+          <button class="btn primary sm" id="new-room-btn" title="新しいチャット">＋</button>
+        </div>
+        <div class="room-filter-tabs">
+          <button data-filter="all" class="active">すべて</button>
+          <button data-filter="unread">未読</button>
+          <button data-filter="mention">To</button>
+        </div>
+        <ul class="room-list" id="room-list"></ul>
+      </aside>
+
+      <!-- チャット本体 -->
+      <section class="chat" id="chat-view">
+        <div class="empty-state" id="no-room">左の一覧からチャットを選んでください</div>
+        <div class="chat-inner" id="chat-inner" hidden>
+          <div class="chat-head">
+            <div>
+              <div class="chat-title" id="chat-title"></div>
+              <div class="chat-sub" id="chat-sub"></div>
+            </div>
+            <button class="icon-btn" id="toggle-panel" title="概要・タスク・ファイル">ⓘ</button>
+          </div>
+          <div class="timeline" id="timeline">
+            <button class="load-more" id="load-more" hidden>以前のメッセージを読み込む</button>
+            <div id="messages"></div>
+          </div>
+          <div class="composer" id="composer">
+            <div class="composer-tools">
+              <button class="tool" id="to-btn" title="宛先を指定">To</button>
+              <button class="tool" id="attach-btn" title="ファイルを添付">📎 ファイル</button>
+              <button class="tool" id="task-btn" title="タスクを追加">✔ タスク</button>
+              <label class="enter-toggle"><input type="checkbox" id="enter-send"> Enterで送信</label>
+            </div>
+            <div class="composer-context" id="composer-context" hidden>
+              <span id="composer-context-text"></span><button class="link" id="cancel-context">取消</button>
+            </div>
+            <div class="pending-files" id="pending-files"></div>
+            <textarea id="message-input" rows="3" placeholder="メッセージを入力（Ctrl+Enterで送信）"></textarea>
+            <div class="composer-actions">
+              <button class="btn primary" id="send-btn">送信</button>
+            </div>
+            <input type="file" id="file-input" multiple hidden>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右パネル -->
+      <aside class="panel" id="panel" hidden>
+        <div class="panel-tabs">
+          <button data-panel="tasks" class="active">タスク</button>
+          <button data-panel="files">ファイル</button>
+          <button data-panel="info">概要</button>
+        </div>
+        <div class="panel-body" id="panel-body"></div>
+      </aside>
+
+      <!-- マイタスク -->
+      <section class="page" id="tasks-view" hidden>
+        <h2>タスク</h2>
+        <div class="seg">
+          <button data-tasktab="mine" class="active">自分のタスク</button>
+          <button data-tasktab="requested">依頼したタスク</button>
+          <button data-tasktab="done">完了済み</button>
+        </div>
+        <ul class="task-list big" id="mytask-list"></ul>
+      </section>
+
+      <!-- メンバー一覧 -->
+      <section class="page" id="contacts-view" hidden>
+        <h2>メンバー</h2>
+        <input id="contact-filter" type="search" placeholder="名前・メールで検索">
+        <ul class="contact-list" id="contact-list"></ul>
+      </section>
+    </div>
+  </div>
+
+  <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

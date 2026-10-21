@@ -1,0 +1,28 @@
+# 社内チャット
+
+チャットワークを参考にした社内向けチャットです。データの保存・ログイン・リアルタイム配信は Supabase（プロジェクト `shanai-chat`、東京リージョン）で行い、画面は HTML / CSS / JavaScript だけで動きます（ビルド作業は不要です）。
+
+## 主な機能
+- グループチャット・個人チャット（マイチャット含む）、未読数、To 未読数
+- To（宛先指定・TO ALL）、返信（RE）、引用、リアクション、編集・削除
+- タスク（担当者・期限・完了管理、自分のタスク／依頼したタスク一覧）
+- ファイル共有（クリップ・ドラッグ＆ドロップ・貼り付け、1ファイル50MBまで、画像はプレビュー表示）
+- デスクトップ通知（To と個人チャット）
+
+## 社員アカウントの発行（管理者）
+1. Supabase 管理画面 → `shanai-chat` → Authentication → Users → **Add user** → **Create new user**
+2. メールアドレスと初期パスワードを入力し、**Auto Confirm User** にチェックを入れて作成
+3. 社員に初期パスワードを伝え、初回ログイン後に右上の自分の名前 → プロフィールで表示名と部署を設定し、パスワードを変更してもらう
+
+※ 登録できるのは `@shinnihonhotels.co.jp` のアドレスだけです（`allowed_email_domains` テーブルで管理）。
+
+## 手元で動かす
+```
+powershell -ExecutionPolicy Bypass -File serve.ps1
+```
+ブラウザで http://localhost:8080 を開きます。
+
+## ファイル構成
+- `index.html` / `style.css` / `app.js` … 画面
+- `config.js` … Supabase の接続先（公開用キー）
+- `serve.ps1` … 手元確認用の簡易サーバー
